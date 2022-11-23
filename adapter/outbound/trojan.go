@@ -116,7 +116,7 @@ func (t *Trojan) DialContext(ctx context.Context, metadata *C.Metadata, opts ...
 			return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
 		}
 	} else {
-		c, err := dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
+		c, err = dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
 		if err != nil {
 			return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
 		}

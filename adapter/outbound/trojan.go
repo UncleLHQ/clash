@@ -111,7 +111,7 @@ func (t *Trojan) DialContext(ctx context.Context, metadata *C.Metadata, opts ...
 
 	var c net.Conn
 	if t.IsByQuic() {
-		c, err = t.DialQuicContext(ctx)
+		c, err = t.DialQuicContext(ctx, t.Base.DialOptions(opts...))
 		if err != nil {
 			return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
 		}
@@ -150,7 +150,7 @@ func (t *Trojan) ListenPacketContext(ctx context.Context, metadata *C.Metadata, 
 		}(c)
 	} else {
 		if t.IsByQuic() {
-			c, err = t.DialQuicContext(ctx)
+			c, err = t.DialQuicContext(ctx, t.Base.DialOptions(opts...))
 			if err != nil {
 				return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
 			}
@@ -183,9 +183,18 @@ func (t *Trojan) IsByQuic() bool {
 	return t.option.Network == "quic"
 }
 
-func (t *Trojan) DialQuicContext(ctx context.Context) (_ net.Conn, err error) {
+func (t *Trojan) DialQuicContext(ctx context.Context, opts []dialer.Option) (_ net.Conn, err error) {
+	pConn, err := dialer.ListenPacket(ctx, "udp", "", opts...)
+	if err != nil {
+		return nil, fmt.Errorf("%s listen UDP at localhost once error: %w", t.addr, err)
+	}
+
+	udpAddr, err := net.ResolveUDPAddr("udp", t.addr)
+	if err != nil {
+		return nil, err
+	}
 	tlsConf := t.instance.GenTLSConfig()
-	c, err := quic.DialAddrContext(ctx, t.addr, tlsConf, nil)
+	c, err := quic.DialContext(ctx, pConn, udpAddr, "", tlsConf, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
 	}
@@ -195,14 +204,23 @@ func (t *Trojan) DialQuicContext(ctx context.Context) (_ net.Conn, err error) {
 		return nil, fmt.Errorf("%s quic failed to open stream with remote server connect error: %w", t.addr, err)
 	}
 
-	return &struct {
-		quic.Connection
-		quic.Stream
-	}{
+	return &wrappedQuicConn{
 		c,
 		stream,
 	}, nil
 }
+
+type wrappedQuicConn struct {
+	quic.Connection
+	quic.Stream
+}
+
+//func (w *wrappedQuicConn) Close() error {
+//	if err := w.Stream.Close(); err != nil {
+//		return err
+//	}
+//	return w.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "The end comes!")
+//}
 
 func NewTrojan(option TrojanOption) (*Trojan, error) {
 	addr := net.JoinHostPort(option.Server, strconv.Itoa(option.Port))

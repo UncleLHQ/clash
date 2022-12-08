@@ -212,7 +212,7 @@ func (t *Trojan) DialQuic(ctx context.Context, opts []dialer.Option) (quic.Conne
 		return nil, err
 	}
 	tlsConf := t.instance.GenTLSConfig()
-	c, err := quic.DialContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+	c, err := quic.DialEarlyContext(ctx, pConn, udpAddr, "", tlsConf, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
 	}

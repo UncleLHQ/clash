@@ -363,7 +363,15 @@ type session struct {
 func (s *session) IsAvailable() bool {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	return s.streamNum <= 16 && time.Now().Sub(s.updateTime) < 15*time.Second
+	if s.conn == nil {
+		return true
+	}
+	select {
+	case <-s.conn.Context().Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *session) Close() error {

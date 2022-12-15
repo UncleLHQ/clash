@@ -370,7 +370,7 @@ func (s *session) IsAvailable() bool {
 	case <-s.conn.Context().Done():
 		return false
 	default:
-		return true
+		return s.updateTime.Sub(time.Now()) < 5*time.Minute
 	}
 }
 
@@ -402,6 +402,7 @@ func (s *session) newStream() (*quicStreamConn, error) {
 		return nil, err
 	}
 	s.streamNum++
+	s.updateTime = time.Now()
 	return newStreamConn(s.conn, stream, s.closeStream), nil
 }
 

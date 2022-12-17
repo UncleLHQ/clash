@@ -45,6 +45,7 @@ type TrojanOption struct {
 	Network        string      `proxy:"network,omitempty"`
 	GrpcOpts       GrpcOptions `proxy:"grpc-opts,omitempty"`
 	WSOpts         WSOptions   `proxy:"ws-opts,omitempty"`
+	ReduceRTT      bool        `proxy:"reduce-rtt,omitempty"`
 }
 
 func (t *Trojan) plainStream(c net.Conn) (net.Conn, error) {
@@ -212,7 +213,13 @@ func (t *Trojan) DialQuic(ctx context.Context, opts []dialer.Option) (quic.Conne
 		return nil, err
 	}
 	tlsConf := t.instance.GenTLSConfig()
-	c, err := quic.DialEarlyContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+	var c quic.Connection
+	if t.option.ReduceRTT {
+		c, err = quic.DialEarlyContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+	} else {
+		c, err = quic.DialContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
 	}

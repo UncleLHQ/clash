@@ -46,6 +46,12 @@ type TrojanOption struct {
 	GrpcOpts       GrpcOptions `proxy:"grpc-opts,omitempty"`
 	WSOpts         WSOptions   `proxy:"ws-opts,omitempty"`
 	ReduceRTT      bool        `proxy:"reduce-rtt,omitempty"`
+	MuxOpts        MuxOptions  `proxy:"mux-opts,omitempty"`
+}
+
+type MuxOptions struct {
+	Concurrency int `proxy:"concurrency,omitempty"`
+	IdleTimeout int `proxy:"idle-timeout,omitempty"`
 }
 
 func (t *Trojan) plainStream(c net.Conn) (net.Conn, error) {
@@ -283,10 +289,22 @@ func NewTrojan(option TrojanOption) (*Trojan, error) {
 		}
 
 		newSession := func() (*session, error) {
+			idleTimeout := 5 * time.Minute
+			if option.MuxOpts.IdleTimeout > 0 {
+				idleTimeout = time.Duration(option.MuxOpts.IdleTimeout) * time.Second
+			}
+
+			concurrency := 1
+			if option.MuxOpts.Concurrency > 0 {
+				concurrency = option.MuxOpts.Concurrency
+			}
+
 			return &session{
-				dialFn:     quicDialFn,
-				mutex:      new(sync.RWMutex),
-				updateTime: time.Now(),
+				dialFn:       quicDialFn,
+				mutex:        new(sync.RWMutex),
+				updateTime:   time.Now(),
+				idleTimeout:  idleTimeout,
+				maxStreamNum: concurrency,
 			}, nil
 		}
 
@@ -362,9 +380,10 @@ type session struct {
 
 	dialFn func() (quic.Connection, error)
 
-	updateTime      time.Time
-	streamNum       int
-	closedStreamNum int
+	updateTime   time.Time
+	idleTimeout  time.Duration
+	streamNum    int
+	maxStreamNum int
 }
 
 func (s *session) IsAvailable() bool {
@@ -377,14 +396,14 @@ func (s *session) IsAvailable() bool {
 	case <-s.conn.Context().Done():
 		return false
 	default:
-		return s.updateTime.Sub(time.Now()) < 5*time.Minute
+		return s.streamNum < s.maxStreamNum && s.updateTime.Sub(time.Now()) < s.idleTimeout
 	}
 }
 
 func (s *session) Close() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if s.conn != nil && s.streamNum == s.closedStreamNum {
+	if s.conn != nil && s.streamNum == 0 {
 		err := s.conn.CloseWithError(0, "quic conn is closing")
 		if err != nil {
 			return err
@@ -416,8 +435,8 @@ func (s *session) newStream() (*quicStreamConn, error) {
 func (s *session) closeStream() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.closedStreamNum++
-	if s.closedStreamNum == s.streamNum {
+	s.streamNum--
+	if s.streamNum == 0 {
 		defer time.AfterFunc(10*time.Second, func() {
 			s.Close()
 		})

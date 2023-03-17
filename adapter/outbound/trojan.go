@@ -12,6 +12,7 @@ import (
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/gun"
 	"github.com/Dreamacro/clash/transport/trojan"
+	"github.com/lucas-clemente/quic-go"
 
 	"golang.org/x/net/http2"
 )
@@ -66,6 +67,11 @@ func (t *Trojan) plainStream(c net.Conn) (net.Conn, error) {
 		return t.instance.StreamWebsocketConn(c, wsOpts)
 	}
 
+	if t.IsByQuic() {
+		// using tls tunnel implemented by quic
+		return c, nil
+	}
+
 	return t.instance.StreamConn(c)
 }
 
@@ -103,15 +109,23 @@ func (t *Trojan) DialContext(ctx context.Context, metadata *C.Metadata, opts ...
 		return NewConn(c, t), nil
 	}
 
-	c, err := dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
-	if err != nil {
-		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
-	}
-	tcpKeepAlive(c)
+	var c net.Conn
+	if t.IsByQuic() {
+		c, err = t.DialQuicContext(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
+		}
+	} else {
+		c, err := dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
+		if err != nil {
+			return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
+		}
+		tcpKeepAlive(c)
 
-	defer func(c net.Conn) {
-		safeConnClose(c, err)
-	}(c)
+		defer func(c net.Conn) {
+			safeConnClose(c, err)
+		}(c)
+	}
 
 	c, err = t.StreamConn(c, metadata)
 	if err != nil {
@@ -135,14 +149,21 @@ func (t *Trojan) ListenPacketContext(ctx context.Context, metadata *C.Metadata, 
 			safeConnClose(c, err)
 		}(c)
 	} else {
-		c, err = dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
-		if err != nil {
-			return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
+		if t.IsByQuic() {
+			c, err = t.DialQuicContext(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
+			}
+		} else {
+			c, err = dialer.DialContext(ctx, "tcp", t.addr, t.Base.DialOptions(opts...)...)
+			if err != nil {
+				return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
+			}
+			defer func(c net.Conn) {
+				safeConnClose(c, err)
+			}(c)
+			tcpKeepAlive(c)
 		}
-		defer func(c net.Conn) {
-			safeConnClose(c, err)
-		}(c)
-		tcpKeepAlive(c)
 		c, err = t.plainStream(c)
 		if err != nil {
 			return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
@@ -156,6 +177,31 @@ func (t *Trojan) ListenPacketContext(ctx context.Context, metadata *C.Metadata, 
 
 	pc := t.instance.PacketConn(c)
 	return newPacketConn(pc, t), err
+}
+
+func (t *Trojan) IsByQuic() bool {
+	return t.option.Network == "quic"
+}
+
+func (t *Trojan) DialQuicContext(ctx context.Context) (_ net.Conn, err error) {
+	tlsConf := t.instance.GenTLSConfig()
+	c, err := quic.DialAddrContext(ctx, t.addr, tlsConf, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
+	}
+
+	stream, err := c.OpenStream()
+	if err != nil {
+		return nil, fmt.Errorf("%s quic failed to open stream with remote server connect error: %w", t.addr, err)
+	}
+
+	return &struct {
+		quic.Connection
+		quic.Stream
+	}{
+		c,
+		stream,
+	}, nil
 }
 
 func NewTrojan(option TrojanOption) (*Trojan, error) {

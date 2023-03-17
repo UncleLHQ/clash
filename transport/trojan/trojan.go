@@ -56,7 +56,7 @@ type Trojan struct {
 	hexPassword []byte
 }
 
-func (t *Trojan) StreamConn(conn net.Conn) (net.Conn, error) {
+func (t *Trojan) GenTLSConfig() *tls.Config {
 	alpn := defaultALPN
 	if len(t.option.ALPN) != 0 {
 		alpn = t.option.ALPN
@@ -68,6 +68,11 @@ func (t *Trojan) StreamConn(conn net.Conn) (net.Conn, error) {
 		InsecureSkipVerify: t.option.SkipCertVerify,
 		ServerName:         t.option.ServerName,
 	}
+	return tlsConfig
+}
+
+func (t *Trojan) StreamConn(conn net.Conn) (net.Conn, error) {
+	tlsConfig := t.GenTLSConfig()
 
 	tlsConn := tls.Client(conn, tlsConfig)
 

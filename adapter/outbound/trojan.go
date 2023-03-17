@@ -14,8 +14,7 @@ import (
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/gun"
 	"github.com/Dreamacro/clash/transport/trojan"
-	"github.com/lucas-clemente/quic-go"
-
+	"github.com/quic-go/quic-go"
 	"golang.org/x/net/http2"
 )
 

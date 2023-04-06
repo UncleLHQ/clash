@@ -22,6 +22,8 @@ type TrojanQuic struct {
 	*Base
 	instance *trojan.Trojan
 	option   *TrojanQuicOption
+
+	sessionManager sessionManager
 }
 
 type TrojanQuicOption struct {
@@ -129,21 +131,51 @@ func NewTrojanQuic(option TrojanQuicOption) (*TrojanQuic, error) {
 		option:   &option,
 	}
 
+	quicDialFn := func() (quic.Connection, error) {
+		return t.DialQuic(context.Background(), t.Base.DialOptions())
+	}
+
+	newSession := func() (*session, error) {
+		idleTimeout := 1 * time.Minute
+		if option.MuxOpts.IdleTimeout > 0 {
+			idleTimeout = time.Duration(option.MuxOpts.IdleTimeout) * time.Second
+		}
+
+		concurrency := 8
+		if option.MuxOpts.Concurrency > 0 {
+			concurrency = option.MuxOpts.Concurrency
+		}
+
+		return &session{
+			dialFn:       quicDialFn,
+			mutex:        new(sync.RWMutex),
+			updateTime:   time.Now(),
+			idleTimeout:  idleTimeout,
+			maxStreamNum: concurrency,
+		}, nil
+	}
+
+	t.sessionManager = sessionManager{
+		ctx:        context.Background(),
+		newSession: newSession,
+		mutex:      new(sync.Mutex),
+	}
+
 	return t, nil
 }
 
 func (t *TrojanQuic) DialQuicContext(ctx context.Context, opts []dialer.Option) (_ net.Conn, err error) {
-	conn, err := t.DialQuic(ctx, opts)
+	session, err := t.sessionManager.getSession()
 	if err != nil {
-		return nil, fmt.Errorf("%s quic failed to connect with remote server connect error: %w", t.addr, err)
+		return nil, err
 	}
 
-	stream, err := conn.OpenStream()
+	stream, err := session.newStream()
 	if err != nil {
 		return nil, fmt.Errorf("%s quic failed to open stream with remote server connect error: %w", t.addr, err)
 	}
 
-	return newStreamConn(conn, stream), nil
+	return stream, nil
 }
 
 func (t *TrojanQuic) DialQuic(ctx context.Context, opts []dialer.Option) (quic.Connection, error) {
@@ -193,6 +225,8 @@ type quicStreamConn struct {
 	lock      sync.Mutex
 	closeOnce sync.Once
 	closeErr  error
+
+	laterClose func()
 }
 
 func (q *quicStreamConn) Write(p []byte) (n int, err error) {
@@ -209,6 +243,9 @@ func (q *quicStreamConn) Close() error {
 }
 
 func (q *quicStreamConn) close() error {
+	if q.laterClose != nil {
+		defer time.AfterFunc(10*time.Second, q.laterClose)
+	}
 
 	// https://github.com/cloudflare/cloudflared/commit/ed2bac026db46b239699ac5ce4fcf122d7cab2cd
 	// Make sure a possible writer does not block the lock forever. We need it, so we can close the writer
@@ -221,19 +258,110 @@ func (q *quicStreamConn) close() error {
 
 	// We have to clean up the receiving stream ourselves since the Close in the bottom does not handle that.
 	q.Stream.CancelRead(0)
-	err := q.Stream.Close()
-	if err != nil {
-		return err
-	}
-
-	return q.Connection.CloseWithError(0, "quic connection closed")
+	return q.Stream.Close()
 }
 
 var _ net.Conn = &quicStreamConn{}
 
-func newStreamConn(c quic.Connection, s quic.Stream) *quicStreamConn {
+func newStreamConn(c quic.Connection, s quic.Stream, laterClose func()) *quicStreamConn {
 	return &quicStreamConn{
 		Connection: c,
 		Stream:     s,
+
+		laterClose: laterClose,
 	}
+}
+
+type session struct {
+	conn  quic.Connection
+	mutex *sync.RWMutex
+
+	dialFn func() (quic.Connection, error)
+
+	updateTime   time.Time
+	idleTimeout  time.Duration
+	streamNum    int
+	maxStreamNum int
+}
+
+func (s *session) IsAvailable() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	if s.conn == nil {
+		return true
+	}
+	select {
+	case <-s.conn.Context().Done():
+		return false
+	default:
+		return s.streamNum < s.maxStreamNum && s.updateTime.Sub(time.Now()) < s.idleTimeout
+	}
+}
+
+func (s *session) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.conn != nil && s.streamNum == 0 {
+		err := s.conn.CloseWithError(0, "quic conn is closing")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *session) newStream() (*quicStreamConn, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.conn == nil {
+		var err error
+		s.conn, err = s.dialFn()
+		if err != nil {
+			return nil, err
+		}
+	}
+	stream, err := s.conn.OpenStream()
+	if err != nil {
+		return nil, err
+	}
+	s.streamNum++
+	s.updateTime = time.Now()
+	return newStreamConn(s.conn, stream, s.closeStream), nil
+}
+
+func (s *session) closeStream() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.streamNum--
+	if s.streamNum == 0 {
+		defer time.AfterFunc(10*time.Second, func() {
+			s.Close()
+		})
+	}
+}
+
+type sessionManager struct {
+	ctx context.Context
+
+	newSession func() (*session, error)
+	session    *session
+
+	mutex *sync.Mutex
+}
+
+func (p *sessionManager) getSession() (*session, error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.session != nil && p.session.IsAvailable() {
+		return p.session, nil
+	}
+
+	s, err := p.newSession()
+	if err != nil {
+		return nil, err
+	}
+
+	p.session = s
+	return s, nil
 }

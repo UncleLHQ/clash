@@ -12,8 +12,10 @@ import (
 
 const SystemDNSPlaceholder = "system"
 
-var systemResolver *Resolver
-var isolateHandler handler
+var (
+	systemResolver *Resolver
+	isolateHandler handler
+)
 
 type dhcpClient struct {
 	enable bool

@@ -2,9 +2,7 @@ package provider
 
 import "time"
 
-var (
-	suspended bool
-)
+var suspended bool
 
 type UpdatableProvider interface {
 	UpdatedAt() time.Time

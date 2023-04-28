@@ -11,8 +11,10 @@ import (
 	C "github.com/Dreamacro/clash/constant"
 )
 
-const rejectCountLimit = 50
-const rejectDelay = time.Second * 30
+const (
+	rejectCountLimit = 50
+	rejectDelay      = time.Second * 30
+)
 
 var rejectCounter = cache.NewLRUCache(cache.WithAge(10), cache.WithStale(false), cache.WithSize(128))
 

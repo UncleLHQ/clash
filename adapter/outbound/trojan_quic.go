@@ -58,7 +58,6 @@ func (t *TrojanQuic) StreamConn(c net.Conn, metadata *C.Metadata) (net.Conn, err
 
 // DialContext implements C.ProxyAdapter
 func (t *TrojanQuic) DialContext(ctx context.Context, metadata *C.Metadata, opts ...dialer.Option) (_ C.Conn, err error) {
-
 	c, err := t.DialQuicContext(ctx, t.Base.DialOptions(opts...))
 	if err != nil {
 		return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
@@ -209,7 +208,6 @@ func (q *quicStreamConn) Close() error {
 }
 
 func (q *quicStreamConn) close() error {
-
 	// https://github.com/cloudflare/cloudflared/commit/ed2bac026db46b239699ac5ce4fcf122d7cab2cd
 	// Make sure a possible writer does not block the lock forever. We need it, so we can close the writer
 	// side of the stream safely.

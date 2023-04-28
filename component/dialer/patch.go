@@ -6,11 +6,15 @@ import (
 	"syscall"
 )
 
-type TunnelDialer func(context context.Context, network, address string) (net.Conn, error)
-type SocketControl func(network, address string, conn syscall.RawConn) error
+type (
+	TunnelDialer  func(context context.Context, network, address string) (net.Conn, error)
+	SocketControl func(network, address string, conn syscall.RawConn) error
+)
 
-var DefaultTunnelDialer TunnelDialer
-var DefaultSocketHook SocketControl
+var (
+	DefaultTunnelDialer TunnelDialer
+	DefaultSocketHook   SocketControl
+)
 
 func DialTunnelContext(ctx context.Context, network, address string) (net.Conn, error) {
 	if dialer := DefaultTunnelDialer; dialer != nil {

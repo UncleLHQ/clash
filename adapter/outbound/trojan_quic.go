@@ -205,9 +205,9 @@ func (t *TrojanQuic) DialQuic(ctx context.Context, opts []dialer.Option) (quic.C
 	}
 	var c quic.Connection
 	if t.option.ReduceRTT {
-		c, err = quic.DialEarlyContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+		c, err = quic.DialEarly(ctx, pConn, udpAddr, tlsConf, nil)
 	} else {
-		c, err = quic.DialContext(ctx, pConn, udpAddr, "", tlsConf, nil)
+		c, err = quic.Dial(ctx, pConn, udpAddr, tlsConf, nil)
 	}
 
 	if err != nil {

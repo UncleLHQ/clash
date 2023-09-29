@@ -12,8 +12,9 @@ import (
 	"github.com/Dreamacro/clash/component/dialer"
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/trojan"
+	"github.com/metacubex/mihomo/transport/tuic/common"
 
-	"github.com/quic-go/quic-go"
+	"github.com/metacubex/quic-go"
 )
 
 var defaultALPN = []string{"h3"}
@@ -60,7 +61,6 @@ func (t *TrojanQuic) StreamConn(c net.Conn, metadata *C.Metadata) (net.Conn, err
 
 // DialContext implements C.ProxyAdapter
 func (t *TrojanQuic) DialContext(ctx context.Context, metadata *C.Metadata, opts ...dialer.Option) (_ C.Conn, err error) {
-
 	c, err := t.DialQuicContext(ctx, t.Base.DialOptions(opts...))
 	if err != nil {
 		return nil, fmt.Errorf("%s quic connect error: %w", t.addr, err)
@@ -213,6 +213,7 @@ func (t *TrojanQuic) DialQuic(ctx context.Context, opts []dialer.Option) (quic.C
 	if err != nil {
 		return nil, fmt.Errorf("%s connect error: %w", t.addr, err)
 	}
+	common.SetCongestionController(c, "bbr", 32)
 	return c, nil
 }
 

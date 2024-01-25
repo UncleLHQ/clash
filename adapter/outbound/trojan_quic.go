@@ -12,8 +12,8 @@ import (
 	"github.com/Dreamacro/clash/component/dialer"
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/trojan"
-	"github.com/metacubex/mihomo/transport/tuic/common"
 
+	"github.com/metacubex/mihomo/transport/tuic/common"
 	"github.com/metacubex/quic-go"
 )
 
@@ -295,7 +295,7 @@ func (s *session) IsAvailable() bool {
 	case <-s.conn.Context().Done():
 		return false
 	default:
-		return s.streamNum < s.maxStreamNum && s.updateTime.Sub(time.Now()) < s.idleTimeout
+		return s.streamNum < s.maxStreamNum && time.Until(s.updateTime) < s.idleTimeout
 	}
 }
 
